@@ -4541,6 +4541,20 @@
   let gisTokenExpiresAt = 0;
   let _gapiReady = false;
   let _gisReady = false;
+  let _tokenPromise = null;  // single-flight lock for concurrent token requests
+  // Restore a still-valid token from localStorage so reloads don't re-prompt.
+  try {
+    const raw = localStorage.getItem("researchDashboard.gisToken");
+    if (raw) {
+      const t = JSON.parse(raw);
+      if (t && t.token && t.expiresAt && Date.now() < t.expiresAt - 60000) {
+        gisAccessToken = t.token;
+        gisTokenExpiresAt = t.expiresAt;
+      } else {
+        localStorage.removeItem("researchDashboard.gisToken");
+      }
+    }
+  } catch (_) {}
   function isStandaloneMode() {
     return !(window.cowork && typeof window.cowork.callMcpTool === "function");
   }
@@ -4561,6 +4575,9 @@
       await loadScript("https://apis.google.com/js/api.js");
       await new Promise(r => gapi.load("client", r));
       await gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"] });
+      // If we have a restored token from localStorage, apply it to gapi
+      // so calls work immediately without re-prompting.
+      if (gisAccessToken) gapi.client.setToken({ access_token: gisAccessToken });
       _gapiReady = true;
     }
     if (!_gisReady) {
@@ -4578,9 +4595,14 @@
   async function gisEnsureToken(opts) {
     const interactive = opts && opts.interactive;
     if (gisTokenIsFresh()) return gisAccessToken;
+    // Single-flight: if a token request is already in flight, await that
+    // instead of starting a parallel one. Prevents the cascade where many
+    // chained syncs each trigger their own OAuth popup.
+    if (_tokenPromise) return _tokenPromise;
     await loadGoogleApis();
-    return new Promise((resolve, reject) => {
+    _tokenPromise = new Promise((resolve, reject) => {
       gisTokenClient.callback = (resp) => {
+        _tokenPromise = null;
         if (resp.error || !resp.access_token) {
           reject(new Error(resp.error || "OAuth failed"));
           return;
@@ -4588,12 +4610,19 @@
         gisAccessToken = resp.access_token;
         gisTokenExpiresAt = Date.now() + ((resp.expires_in || 3600) * 1000);
         gapi.client.setToken({ access_token: gisAccessToken });
-        try { localStorage.setItem("researchDashboard.gisSignedIn", "1"); } catch (_) {}
+        try {
+          localStorage.setItem("researchDashboard.gisSignedIn", "1");
+          localStorage.setItem("researchDashboard.gisToken", JSON.stringify({
+            token: gisAccessToken,
+            expiresAt: gisTokenExpiresAt
+          }));
+        } catch (_) {}
         if (typeof updateSignInUi === "function") updateSignInUi();
         resolve(gisAccessToken);
       };
       gisTokenClient.requestAccessToken({ prompt: interactive ? "consent" : "" });
     });
+    return _tokenPromise;
   }
   function gisSignOut() {
     if (gisAccessToken) {
@@ -4601,7 +4630,10 @@
     }
     gisAccessToken = null;
     gisTokenExpiresAt = 0;
-    try { localStorage.removeItem("researchDashboard.gisSignedIn"); } catch (_) {}
+    try {
+      localStorage.removeItem("researchDashboard.gisSignedIn");
+      localStorage.removeItem("researchDashboard.gisToken");
+    } catch (_) {}
     gcalCache.events = [];
     if (typeof updateSignInUi === "function") updateSignInUi();
     if (typeof animatedRender === "function") animatedRender();
