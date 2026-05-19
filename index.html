@@ -1323,6 +1323,76 @@
       border-color: var(--border-accent);
       background: var(--accent-soft);
     }
+    /* Goal / Deadline type toggle */
+    .todo-add-type-toggle {
+      display: inline-flex;
+      gap: 0;
+      align-items: center;
+      padding: 1px;
+      background: var(--bg-faint, rgba(0,0,0,0.04));
+      border: 1px solid var(--border, rgba(0,0,0,0.08));
+      border-radius: 999px;
+      font-size: 10.5px;
+      font-style: normal;
+      flex-shrink: 0;
+      margin-right: 6px;
+    }
+    .todo-add-type-toggle button {
+      background: transparent;
+      border: none;
+      padding: 2px 8px;
+      border-radius: 999px;
+      color: var(--text-faint);
+      font: inherit;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.12s, color 0.12s;
+      line-height: 1.2;
+    }
+    .todo-add-type-toggle button:hover {
+      color: var(--text-muted);
+    }
+    .todo-add-type-toggle button.active.type-week {
+      background: var(--accent);
+      color: #fff;
+    }
+    .todo-add-type-toggle button.active.type-deadline {
+      background: #e84a4a;
+      color: #fff;
+    }
+    /* Deadline mode — red tint on the add row */
+    .todo-proj-add-goal.is-deadline {
+      border-color: rgba(232, 74, 74, 0.45);
+      border-style: solid;
+      background: rgba(232, 74, 74, 0.06);
+    }
+    .todo-proj-add-goal.is-deadline:hover {
+      border-color: rgba(232, 74, 74, 0.7);
+    }
+    .todo-proj-add-goal.is-deadline:focus-within {
+      border-color: #e84a4a;
+      background: rgba(232, 74, 74, 0.09);
+    }
+    .todo-proj-add-goal.is-deadline input::placeholder {
+      color: rgba(232, 74, 74, 0.65);
+    }
+    .todo-add-deadline-date {
+      flex: 0 0 auto;
+      width: auto;
+      max-width: 130px;
+      background: transparent;
+      border: 1px solid rgba(232, 74, 74, 0.35);
+      border-radius: var(--radius-sm);
+      color: #c83a3a;
+      font: inherit;
+      font-size: 11.5px;
+      padding: 1px 4px;
+      outline: none;
+      cursor: pointer;
+    }
+    .todo-add-deadline-date:focus {
+      border-color: #e84a4a;
+    }
     /* Hover-revealed × delete on goal rows */
     .goal-delete {
       background: none;
@@ -5594,6 +5664,11 @@
   // Per-project add-goal open state (in-memory, defaults to closed). Keyed by
   // project id ("_personal", "_none", or real project id).
   const todoProjAddOpen = {};
+  // Per-project add-goal type toggle ("week" = weekly goal, "deadline" = dated
+  // deadline). In-memory only, defaults to "week".
+  const todoProjAddType = {};
+  // Per-project add-goal deadline date (YYYY-MM-DD). In-memory only.
+  const todoProjAddDate = {};
   // Show all-deadlines toggle (vs collapsed-to-14-day horizon).
   let _deadlinesShowAll = false;
   // Archive tab filter — null = All, PERSONAL_ID for personal, project id otherwise.
@@ -5816,8 +5891,16 @@
           html += `<div class="todo-proj-goals">`;
           if (!isEmpty) open.forEach(g => { html += renderGoalRow(g); });
           html += `</div>`;
-          html += `<div class="todo-proj-add-goal" data-todo-add-goal="${escapeHtml(projIdForAdd)}">
-            <input type="text" data-todo-add-goal-input="${escapeHtml(projIdForAdd)}" data-todo-add-goal-key="${escapeHtml(key)}" placeholder="+ add goal" autocomplete="off" />
+          const addType = todoProjAddType[key] || "week";
+          const isDl = addType === "deadline";
+          const dateVal = todoProjAddDate[key] || todayStr();
+          html += `<div class="todo-proj-add-goal ${isDl ? 'is-deadline' : ''}" data-todo-add-goal="${escapeHtml(projIdForAdd)}">
+            <div class="todo-add-type-toggle" data-todo-add-type-key="${escapeHtml(key)}">
+              <button type="button" class="${!isDl ? 'active type-week' : ''}" data-type="week">Goal</button>
+              <button type="button" class="${isDl ? 'active type-deadline' : ''}" data-type="deadline">Deadline</button>
+            </div>
+            <input type="text" data-todo-add-goal-input="${escapeHtml(projIdForAdd)}" data-todo-add-goal-key="${escapeHtml(key)}" placeholder="${isDl ? '+ add deadline' : '+ add goal'}" autocomplete="off" />
+            ${isDl ? `<input type="date" class="todo-add-deadline-date" data-todo-add-date-key="${escapeHtml(key)}" value="${escapeHtml(dateVal)}" />` : ''}
           </div>`;
         }
         html += `</div>`;
@@ -5924,15 +6007,62 @@
       });
     });
 
+    // Goal / Deadline type toggle (per-project add row)
+    list.querySelectorAll('[data-todo-add-type-key]').forEach(toggle => {
+      const key = toggle.dataset.todoAddTypeKey;
+      toggle.querySelectorAll('button[data-type]').forEach(btn => {
+        btn.addEventListener("click", e => {
+          e.stopPropagation();
+          e.preventDefault();
+          const t = btn.dataset.type === "deadline" ? "deadline" : "week";
+          todoProjAddType[key] = t;
+          if (t === "deadline" && !todoProjAddDate[key]) {
+            todoProjAddDate[key] = todayStr();
+          }
+          renderTodoPanel();
+          // Re-focus the text input after re-render.
+          const sel = `[data-todo-add-goal-key="${key.replace(/"/g, '\\"')}"]`;
+          const input = list.querySelector(sel);
+          if (input) input.focus();
+        });
+        // Suppress blur from firing on input when clicking toggle.
+        btn.addEventListener("mousedown", e => { e.preventDefault(); });
+      });
+    });
+
+    // Deadline date input changes
+    list.querySelectorAll('[data-todo-add-date-key]').forEach(dateInput => {
+      const key = dateInput.dataset.todoAddDateKey;
+      dateInput.addEventListener("change", e => {
+        todoProjAddDate[key] = dateInput.value || todayStr();
+      });
+      // Prevent blur from closing the add row when clicking the date picker.
+      dateInput.addEventListener("mousedown", e => { e.stopPropagation(); });
+      dateInput.addEventListener("focus", e => {
+        // Reopen if blur already closed it.
+        if (key) todoProjAddOpen[key] = true;
+      });
+    });
+
     // Inline + add goal inputs
     list.querySelectorAll('[data-todo-add-goal-input]').forEach(input => {
       input.addEventListener("keydown", e => {
         const key = input.dataset.todoAddGoalKey;
         if (e.key === "Enter" && input.value.trim()) {
           const projId = input.dataset.todoAddGoalInput || null;
-          addTask(input.value.trim(), projId || null, null, { isGoal: true, goalType: "week" });
+          const type = todoProjAddType[key] === "deadline" ? "deadline" : "week";
+          const dueArg = type === "deadline"
+            ? (todoProjAddDate[key] || todayStr())
+            : null;
+          addTask(input.value.trim(), projId || null, dueArg, { isGoal: true, goalType: type });
           input.value = "";
-          if (key) todoProjAddOpen[key] = false;
+          if (key) {
+            todoProjAddOpen[key] = false;
+            // Reset type back to "week" after adding so the next add starts
+            // clean. Keep the chosen date so quick repeat-adds of multiple
+            // deadlines on the same day don't require re-picking.
+            todoProjAddType[key] = "week";
+          }
           renderTodoPanel();
         } else if (e.key === "Escape") {
           e.preventDefault();
@@ -5945,11 +6075,17 @@
         const key = input.dataset.todoAddGoalKey;
         // Use a small delay so Enter-save (which also triggers blur) wins.
         setTimeout(() => {
+          // If focus moved to the toggle buttons or date picker for the same
+          // key, don't close — wait for the user to actually leave.
+          const active = document.activeElement;
+          if (active && (active.closest && active.closest('[data-todo-add-goal]'))) {
+            return;
+          }
           if (key && todoProjAddOpen[key]) {
             todoProjAddOpen[key] = false;
             renderTodoPanel();
           }
-        }, 120);
+        }, 160);
       });
     });
 
