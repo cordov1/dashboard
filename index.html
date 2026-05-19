@@ -5037,6 +5037,7 @@
         eventId: task.gcalEventId,
         summary: desiredTitle,
         description: gcalDescFor(task),
+        allDay: true,  // events are always all-day; without this, GCal rejects with "Invalid start time"
         ...times
       });
       // Mark convergence so the page-load backfill skips this on next visit.
