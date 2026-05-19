@@ -4883,7 +4883,8 @@
       // refresh them once events arrive so everything populates without needing
       // another interaction.
       renderFocus();
-      if (document.getElementById("view-calendar").classList.contains("active")) renderCalendar();
+      const _calView = document.getElementById("view-calendar");
+      if (_calView && _calView.classList.contains("active")) renderCalendar();
     } catch (e) {
       console.warn("GCal fetch failed", e);
     }
