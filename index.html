@@ -4643,7 +4643,17 @@
   function _mcpWrap(payload) { return { content: [{ text: JSON.stringify(payload) }] }; }
   async function gcalCallStandalone(tool, args) {
     args = args || {};
+    // Always ensure gapi/GIS scripts are loaded before any API call. When the
+    // OAuth token is restored from localStorage (gisTokenIsFresh()), the
+    // gisEnsureToken short-circuit returns early WITHOUT loading the libs,
+    // so we must explicitly load them here.
+    await loadGoogleApis();
     await gisEnsureToken({});
+    // Reapply the token to gapi after load — in case gapi.client.setToken
+    // hadn't been called yet for a restored-from-localStorage token.
+    if (gisAccessToken && window.gapi && gapi.client && gapi.client.setToken) {
+      gapi.client.setToken({ access_token: gisAccessToken });
+    }
     if (tool === "list_events") {
       const params = {
         calendarId: "primary",
