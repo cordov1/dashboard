@@ -5010,6 +5010,7 @@
       const newId = event && (event.id || (event.event && event.event.id));
       if (newId) {
         task.gcalEventId = newId;
+        task._lastSyncedTitle = gcalTitleFor(task);
         save();
         render();
       } else {
@@ -5030,12 +5031,16 @@
     if (!task.gcalEventId) return syncTaskCreate(task);
     try {
       const times = dateToAllDayUTC(task.dueDate);
+      const desiredTitle = gcalTitleFor(task);
       await gcalCall("update_event", {
         eventId: task.gcalEventId,
-        summary: gcalTitleFor(task),
+        summary: desiredTitle,
         description: gcalDescFor(task),
         ...times
       });
+      // Mark convergence so the page-load backfill skips this on next visit.
+      task._lastSyncedTitle = desiredTitle;
+      save();
     } catch (e) {
       // If the event was deleted externally, fall back to creating a fresh one.
       const msg = String((e && e.message) || e || "").toLowerCase();
@@ -9091,29 +9096,36 @@
       chainSync(t.id, () => syncTaskCreate(t));
     });
     // Done-title backfill: completed dated tasks should have a "✓ " prefix on
-    // their GCal summary. If the title was set while sync was broken (or before
-    // a related fix), the prefix is missing. Patch each done+linked event once
-    // per session so titles converge to current state.
-    try {
-      const FLAG = "researchDashboard.doneTitleBackfilled.v1";
-      const already = sessionStorage.getItem(FLAG);
-      if (!already) {
-        let scheduled = 0;
-        state.tasks.forEach(t => {
-          if (!t.dueDate || t.isDivider) return;
-          if (!t.gcalEventId) return;
-          if (!t.done) return;
-          // Check the cached event's summary; only patch if the prefix is missing.
-          const ev = gcalCache.events.find(e => e.id === t.gcalEventId);
-          const summary = ev && ev.summary;
-          if (summary && summary.indexOf("✓") === 0) return; // already prefixed
-          chainSync(t.id, () => syncTaskUpdate(t));
-          scheduled++;
-        });
-        sessionStorage.setItem(FLAG, String(scheduled));
-        if (scheduled > 0) console.log("Backfilled ✓ prefix for", scheduled, "completed tasks");
-      }
-    } catch (_) {}
+    // their GCal summary. Track per-task what we last synced so we only patch
+    // when it diverges from the current desired title. Runs every page load
+    // because the cost is ~1 API call per task that needs convergence.
+    (async () => {
+      try {
+        const candidates = state.tasks.filter(t =>
+          t.dueDate && !t.isDivider && t.gcalEventId &&
+          (t._lastSyncedTitle !== gcalTitleFor(t))
+        );
+        let patched = 0, failed = 0;
+        for (const t of candidates) {
+          try {
+            await gcalCall("update_event", {
+              eventId: t.gcalEventId,
+              summary: gcalTitleFor(t),
+              description: gcalDescFor(t)
+            });
+            t._lastSyncedTitle = gcalTitleFor(t);
+            patched++;
+          } catch (e) {
+            failed++;
+            console.warn("title-sync failed for", t.title, e);
+          }
+        }
+        if (patched > 0) {
+          save();
+          console.log("Title-sync:", patched, "patched,", failed, "failed");
+        }
+      } catch (e) { console.warn("backfill error", e); }
+    })();
   });
   // v3 auto-clean migration neutralized — the original "delete events for
   // non-completed tasks" rule was reverted. Function kept as a no-op.
