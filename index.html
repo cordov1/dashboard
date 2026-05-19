@@ -9090,6 +9090,30 @@
       if (!t.dueDate || t.isDivider || t.gcalEventId) return;
       chainSync(t.id, () => syncTaskCreate(t));
     });
+    // Done-title backfill: completed dated tasks should have a "✓ " prefix on
+    // their GCal summary. If the title was set while sync was broken (or before
+    // a related fix), the prefix is missing. Patch each done+linked event once
+    // per session so titles converge to current state.
+    try {
+      const FLAG = "researchDashboard.doneTitleBackfilled.v1";
+      const already = sessionStorage.getItem(FLAG);
+      if (!already) {
+        let scheduled = 0;
+        state.tasks.forEach(t => {
+          if (!t.dueDate || t.isDivider) return;
+          if (!t.gcalEventId) return;
+          if (!t.done) return;
+          // Check the cached event's summary; only patch if the prefix is missing.
+          const ev = gcalCache.events.find(e => e.id === t.gcalEventId);
+          const summary = ev && ev.summary;
+          if (summary && summary.indexOf("✓") === 0) return; // already prefixed
+          chainSync(t.id, () => syncTaskUpdate(t));
+          scheduled++;
+        });
+        sessionStorage.setItem(FLAG, String(scheduled));
+        if (scheduled > 0) console.log("Backfilled ✓ prefix for", scheduled, "completed tasks");
+      }
+    } catch (_) {}
   });
   // v3 auto-clean migration neutralized — the original "delete events for
   // non-completed tasks" rule was reverted. Function kept as a no-op.
