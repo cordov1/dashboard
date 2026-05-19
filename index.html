@@ -4914,10 +4914,10 @@
     return lines.join("\n");
   }
   async function syncTaskCreate(task) {
-    // v3.1 rule: every dated non-goal task syncs. Done state is reflected
-    // via a ✓ prefix on the GCal summary (handled by gcalTitleFor).
-    // Lunch dividers are local UI only — never sync.
-    if (!task.dueDate || task.isGoal || task.isDivider) return;
+    // v3.2 rule: every dated task syncs (including goals — if you put a date
+    // on a goal, you want it on your calendar). Done state is reflected via
+    // a ✓ prefix on the GCal summary. Lunch dividers stay local-only.
+    if (!task.dueDate || task.isDivider) return;
     try {
       const times = dateToAllDayUTC(task.dueDate);
       const raw = await gcalCall("create_event", {
@@ -4938,7 +4938,7 @@
     } catch (e) { console.warn("create failed", e); }
   }
   async function syncTaskUpdate(task) {
-    if (!task.dueDate || task.isGoal || task.isDivider) {
+    if (!task.dueDate || task.isDivider) {
       if (task.gcalEventId) {
         const id = task.gcalEventId;
         task.gcalEventId = null;
@@ -5018,7 +5018,7 @@
     setSyncSpinning(true);
     let synced = 0;
     for (const t of state.tasks) {
-      if (!t.dueDate || t.isGoal) continue;
+      if (!t.dueDate || t.isDivider) continue;
       if (t.gcalEventId) await syncTaskUpdate(t);
       else { await syncTaskCreate(t); if (t.gcalEventId) synced++; }
     }
@@ -8941,7 +8941,7 @@
     // divider) but has no gcalEventId gets pushed. Covers tasks created while
     // the v3 "completion-only" rule was active or any orphans from past states.
     state.tasks.forEach(t => {
-      if (!t.dueDate || t.isGoal || t.isDivider || t.gcalEventId) return;
+      if (!t.dueDate || t.isDivider || t.gcalEventId) return;
       chainSync(t.id, () => syncTaskCreate(t));
     });
   });
