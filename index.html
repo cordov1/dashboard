@@ -6818,7 +6818,7 @@
         <input type="checkbox" class="checkbox sub-cb" data-sub-toggle="${s.id}" ${s.done ? 'checked' : ''} />
         <span class="sub-text" data-sub-edit="${s.id}">${escapeHtml(s.title)}</span>
         <span class="sub-due-pill ${cls}" data-sub-due="${s.id}" title="Click to reschedule">${escapeHtml(dueLab)}</span>
-        ${s.gcalEventId ? '<span class="gcal-mark" title="Synced to Google Calendar"></span>' : ''}
+        ${(isGcalAutoCreateOn() && s.gcalEventId) ? '<span class="gcal-mark" title="Synced to Google Calendar"></span>' : ''}
         <button class="sub-del" data-sub-del="${s.id}" title="Delete">×</button>
       </div>`;
     });
@@ -6959,7 +6959,7 @@
         dueChip = `<span class="due-pill is-blank" data-action="open-due" data-id="${t.id}" title="Click to set a date">📅</span>`;
       }
     }
-    const gcalMark = t.gcalEventId
+    const gcalMark = (isGcalAutoCreateOn() && t.gcalEventId)
       ? `<span class="gcal-mark" title="Synced to Google Calendar"></span>`
       : "";
     // If this task is linked to a GCal event AND the event is still in cache,
