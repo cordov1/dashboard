@@ -4319,9 +4319,24 @@
         <button id="gisSignInBtn">Sign in with Google</button>
         <button id="gisSignOutBtn" style="display:none">Sign out</button>
       </div>
+      <div class="sync-row" style="align-items:center">
+        <div class="sync-info" style="flex:1">
+          <b>Auto-create GCal events</b><br>
+          <span style="opacity:.7;font-size:12px">When on, every dated task/goal pushes to GCal as an all-day event. Turning off stops new events from being created — existing events and the calendar view are unaffected.</span>
+        </div>
+        <label style="position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0;margin-left:12px;cursor:pointer">
+          <input type="checkbox" id="gcalAutoCreateToggle" style="opacity:0;width:0;height:0">
+          <span style="position:absolute;inset:0;background:var(--border);border-radius:12px;transition:background .2s"></span>
+          <span style="position:absolute;top:2px;left:2px;width:20px;height:20px;background:#fff;border-radius:50%;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.2)"></span>
+        </label>
+      </div>
+      <style>
+        #gcalAutoCreateToggle:checked + span { background: var(--accent, #4f8ff7); }
+        #gcalAutoCreateToggle:checked + span + span { transform: translateX(20px); }
+      </style>
       <div class="sync-row">
         <div class="sync-info">
-          <b>Every dated task syncs.</b> Each task with a due date pushes to GCal as an all-day event. When you check it off, the event's title gets a ✓ prefix so you can see what got done.
+          <b>Sync all dated tasks</b>
         </div>
         <button id="syncAllBtn">Sync all dated tasks</button>
       </div>
@@ -4994,10 +5009,21 @@
     }
     return lines.join("\n");
   }
+  // ---------- GCal auto-create toggle ----------
+  const GCAL_AUTOCREATE_KEY = "researchDashboard.gcalAutoCreate";
+  function isGcalAutoCreateOn() {
+    const v = localStorage.getItem(GCAL_AUTOCREATE_KEY);
+    return v === null ? true : v === "true";   // default ON for existing users
+  }
+  function setGcalAutoCreate(on) {
+    localStorage.setItem(GCAL_AUTOCREATE_KEY, String(!!on));
+  }
+
   async function syncTaskCreate(task) {
     // v3.2 rule: every dated task syncs (including goals — if you put a date
     // on a goal, you want it on your calendar). Done state is reflected via
     // a ✓ prefix on the GCal summary. Lunch dividers stay local-only.
+    if (!isGcalAutoCreateOn()) return;          // toggle guard
     if (!task.dueDate || task.isDivider) return;
     try {
       const times = dateToAllDayUTC(task.dueDate);
@@ -8969,6 +8995,13 @@
   document.getElementById("syncBtn").addEventListener("click", () => refreshGcalEvents(true));
   (document.getElementById("syncAllBtn") || {addEventListener: function(){}}).addEventListener("click", () => syncAll());
 
+  // ---------- GCal auto-create toggle wiring ----------
+  const _acToggle = document.getElementById("gcalAutoCreateToggle");
+  if (_acToggle) {
+    _acToggle.checked = isGcalAutoCreateOn();
+    _acToggle.addEventListener("change", () => setGcalAutoCreate(_acToggle.checked));
+  }
+
   // ---------- Standalone-mode (GitHub Pages) sign-in UI ----------
   function updateSignInUi() {
     const row = document.getElementById("gisAuthRow");
@@ -9093,10 +9126,13 @@
     // Auto-catchup: any task that should be synced (dated, not a goal, not a
     // divider) but has no gcalEventId gets pushed. Covers tasks created while
     // the v3 "completion-only" rule was active or any orphans from past states.
-    state.tasks.forEach(t => {
-      if (!t.dueDate || t.isDivider || t.gcalEventId) return;
-      chainSync(t.id, () => syncTaskCreate(t));
-    });
+    // Skipped when auto-create is off (going-forward-only policy).
+    if (isGcalAutoCreateOn()) {
+      state.tasks.forEach(t => {
+        if (!t.dueDate || t.isDivider || t.gcalEventId) return;
+        chainSync(t.id, () => syncTaskCreate(t));
+      });
+    }
     // Done-title backfill: completed dated tasks should have a "✓ " prefix on
     // their GCal summary. Track per-task what we last synced so we only patch
     // when it diverges from the current desired title. Runs every page load
